@@ -6,6 +6,8 @@ sudo apt-get install gstreamer0.10-pocketsphinx pocketsphinx-lm-en-hub4 pocketsp
 
 ```
 
+Note: `pocketsphinx-lm-en-hub` and `pocketsphinx-hmm-en-hub4wsj` are necessary for the sample only, if you have your own language and acoustic models you won't need those.
+
 
 Subscribing to ROS audio messages:
 ---------------------------------
