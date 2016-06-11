@@ -1,3 +1,15 @@
+#Introduction
+
+This is a continuation of felixduvallet/pocketsphinx fork of this ROS package. 
+
+The idea is to work on the following tasks in order to be able to use this package for my college project (a pet robot):
+
+ - add kws support
+ - update to work with gstreamer1.0
+ - update to work with latest pocketsphinx version.
+
+#Documentation
+
 A simple ROS wrapper for using Pocketsphinx (via gstreamer) with ROS. See docs here http://wiki.ros.org/pocketsphinx
 
 If installing from source you will need to install the following:
