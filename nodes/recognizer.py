@@ -21,14 +21,14 @@ import roslib; roslib.load_manifest('pocketsphinx')
 import rospy
 import os
 
-import pygtk
-pygtk.require('2.0')
-import gtk
+#import pygtk
+#pygtk.require('2.0')
+#import gtk
 
 import gobject
 import pygst
 pygst.require('0.10')
-gobject.threads_init()
+#gobject.threads_init()
 import gst
 
 from std_msgs.msg import String
@@ -83,7 +83,6 @@ class recognizer(object):
         rospy.loginfo("Audio input: {}".format(self.launch_config))
 
         self.launch_config += " ! audioconvert ! audioresample " \
-                            + '! vader name=vad auto-threshold=true ' \
                             + '! pocketsphinx name=asr ! fakesink'
 
         # Configure ROS settings
@@ -186,7 +185,7 @@ class recognizer(object):
                 rospy.delete_param(param)
 
         """ Shutdown the GTK thread. """
-        gtk.main_quit()
+        #gtk.main_quit()
 
     def start(self, req):
         self.start_recognizer()
@@ -244,4 +243,5 @@ class recognizer(object):
 
 if __name__ == "__main__":
     start = recognizer()
-    gtk.main()
+    rospy.spin()
+    #gtk.main()
