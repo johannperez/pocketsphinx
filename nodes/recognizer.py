@@ -156,7 +156,15 @@ class recognizer(object):
                             + '! pocketsphinx name=asr ! fakesink' 
         
     def element_message(self, bus, msg):
-        rospy.loginfo('Message recrecieved!!!')
+        rospy.loginfo('Message recrecieved')
+        msgtype = msg.get_structure().get_name()
+        if msgtype != 'pocketsphinx':
+            return
+
+        if msg.get_structure().get_value('final'):
+            self.final_result(msg.get_structure().get_value('hypothesis')) #TODO: it would be nice to publish to a topic including confidence, msg.get_structure().get_value('confidence'))
+        elif msg.get_structure().get_value('hypothesis'):
+            self.partial_result(msg.get_structure().get_value('hypothesis'))
            
     def start_recognizer(self):
         self.pipeline.set_state(Gst.State.PLAYING)
@@ -183,9 +191,6 @@ class recognizer(object):
             if rospy.has_param(param):
                 rospy.delete_param(param)
 
-        """ Shutdown the GTK thread. """
-        #gtk.main_quit()
-
     def start(self, req):
         self.start_recognizer()
         rospy.loginfo("recognizer started")
@@ -196,34 +201,10 @@ class recognizer(object):
         rospy.loginfo("recognizer stopped")
         return EmptyResponse()
 
-    def asr_partial_result(self, asr, text, uttid):
-        """ Forward partial result signals on the bus to the main thread. """
-        struct = Gst.Structure('partial_result')
-        struct.set_value('hyp', text)
-        struct.set_value('uttid', uttid)
-        asr.post_message(Gst.message_new_application(asr, struct))
+    def partial_result(self, hyp):
+        rospy.loginfo("Partial: " + hyp)
 
-    def asr_result(self, asr, text, uttid):
-        """ Forward result signals on the bus to the main thread. """
-        struct = Gst.Structure('result')
-        struct.set_value('hyp', text)
-        struct.set_value('uttid', uttid)
-        asr.post_message(Gst.message_new_application(asr, struct))
-
-    def application_message(self, bus, msg):
-        """ Receive application messages from the bus. """
-        msgtype = msg.structure.get_name()
-        if msgtype == 'partial_result':
-            self.partial_result(msg.structure['hyp'], msg.structure['uttid'])
-        if msgtype == 'result':
-            self.final_result(msg.structure['hyp'], msg.structure['uttid'])
-
-    def partial_result(self, hyp, uttid):
-        """ Delete any previous selection, insert text and select it. """
-        rospy.logdebug("Partial: " + hyp)
-
-    def final_result(self, hyp, uttid):
-        """ Insert the final result. """
+    def final_result(self, hyp):
         msg = String()
         msg.data = str(hyp.lower())
         rospy.loginfo('Final result: {}'.format(msg.data))
@@ -241,8 +222,9 @@ class recognizer(object):
 
 
 if __name__ == "__main__":
-    start = recognizer()
-    #gtk.main()
-    GObject.MainLoop().run() 
-    #rospy.spin()
+    r = recognizer()
+    try:
+        GObject.MainLoop().run()
+    except (KeyboardInterrupt):
+        r.shutdown()
     
