@@ -5,7 +5,9 @@ recognizer.py is a wrapper for pocketsphinx.
   parameters:
     ~lm - filename of language model
     ~dict - filename of dictionary
-    ~mic_name - set the pulsesrc device name for the microphone input.
+    ~alsa_mic_name - set the alsasrc device name
+        e.g. hw:1,0
+    ~pulse_mic_name - set the pulsesrc device name for the microphone input.
            e.g. a Logitech G35 Headset has the following device name:
            alsa_input.usb-Logitech_Logitech_G35_Headset-00-Headset_1.analog-mono
            To list audio device info on your machine, in a terminal type:
@@ -37,8 +39,9 @@ import commands
 
 class recognizer(object):
     """ GStreamer based speech recognizer. """
-    
-    _device_name_param = "~mic_name"
+
+    _alsa_device_name_param = "~alsa_mic_name"
+    _pulse_device_name_param = "~pulse_mic_name"
     _lm_param = "~lm"
     _dic_param = "~dict"
     _audio_topic_param = "~audio_msg_topic"
@@ -131,11 +134,14 @@ class recognizer(object):
         self.pub = rospy.Publisher('~output', String, queue_size=10)
 
     def init_launch_config(self):
-        if rospy.has_param(self._device_name_param):
-            self.device_name = rospy.get_param(self._device_name_param)
-            self.device_index = self.pulse_index_from_name(self.device_name)
+        if rospy.has_param(self._pulse_device_name_param):
+            self.device_name = rospy.get_param(self._pulse_device_name_param)
+            self.device_index = self.pulse_index_from_name(self._pulse_device_name_param)
             self.launch_config = "pulsesrc device=" + str(self.device_index)
             rospy.loginfo("Using: pulsesrc device=%s name=%s", self.device_index, self.device_name)
+        elif rospy.has_param(self._alsa_device_name_param):
+            self.launch_config = 'alsasrc device=' + rospy.get_param(self._alsa_device_name_param)
+            rospy.loginfo("Using: alsasrc device=%s", rospy.get_param(self._alsa_device_name_param))
         elif rospy.has_param('~source'):
             # common sources: 'alsasrc'
             self.launch_config = rospy.get_param('~source')
@@ -148,7 +154,7 @@ class recognizer(object):
             rospy.loginfo('Using ROS audio messages as input. Topic: {}'.
                           format(self._ros_audio_topic))
         else:
-            self.launch_config = 'alsasrc device=plughw:0,0'# 'alsasrc device=plughw:0,0'#'pulsesrc'#'autoaudiosrrc'
+            self.launch_config = 'autoaudiosrrc'
 
         rospy.loginfo("Audio input: {}".format(self.launch_config))
 
@@ -186,7 +192,7 @@ class recognizer(object):
 
     def shutdown(self):
         """ Delete any remaining parameters so they don't affect next launch """
-        for param in [self._device_name_param, self._lm_param, self._dic_param,
+        for param in [self._alsa_device_name_param, self._pulse_device_name_param, self._lm_param, self._dic_param,
                       self._audio_topic_param]:
             if rospy.has_param(param):
                 rospy.delete_param(param)
