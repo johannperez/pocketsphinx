@@ -21,15 +21,13 @@ import roslib; roslib.load_manifest('pocketsphinx')
 import rospy
 import os
 
-#import pygtk
-#pygtk.require('2.0')
-#import gtk
+from gi import pygtkcompat
+import gi
 
-import gobject
-import pygst
-pygst.require('0.10')
-#gobject.threads_init()
-import gst
+gi.require_version('Gst', '1.0')
+from gi.repository import GObject, Gst
+GObject.threads_init()
+Gst.init(None)
 
 from std_msgs.msg import String
 from std_srvs.srv import Empty, EmptyResponse
@@ -39,28 +37,100 @@ import commands
 
 class recognizer(object):
     """ GStreamer based speech recognizer. """
+    
+    _device_name_param = "~mic_name"
+    _lm_param = "~lm"
+    _dic_param = "~dict"
+    _audio_topic_param = "~audio_msg_topic"
+    
+    _ros_audio_topic = None
+    _app_source = None
 
+    asr = None
+    bus = None
+    bus_id = None
+    
+    started = False
+    
     def __init__(self):
-        # Start node
+        rospy.loginfo('#########')
         rospy.init_node("recognizer")
 
-        # Find the name of your microphone by typing pacmd list-sources in the
-        # terminal.
-        self._device_name_param = "~mic_name"
-        self._lm_param = "~lm"
-        self._dic_param = "~dict"
-        self._audio_topic_param = "~audio_msg_topic"
+        if not self.valid_parameters():
+            return
 
-        self.asr = None
-        self.bus = None
-        self.bus_id = None
+        self.init_launch_config()
+        self.configure_ros()
+        self.init_pipeline()
+        
+        self.asr = self.pipeline.get_by_name('asr')
+        
+        if self._ros_audio_topic:
+            if not self.suscribe_to_audio_topic():
+                return;
 
-        # Audio ROS topic, if this is set the recognizer will subscribe to
-        # AudioData messages on this topic.
-        self._ros_audio_topic = None
-        self._app_source = None  # The gstreamer appsrc element
+        self.asr.set_property('lm', self.lm)
+        self.asr.set_property('dict', self.dic)
+        
+        self.bus = self.pipeline.get_bus()
+        self.bus.add_signal_watch()
+        self.bus.connect('message::element', self.element_message)
 
-        # Configure mics with gstreamer launch config
+        self.pipeline.set_state(Gst.State.PAUSED)
+        #self.start_recognizer()
+                          
+    def suscribe_to_audio_topic(self):
+        # returns True if it is able to subscribe succesfully
+        self._app_source = self.pipeline.get_by_name('appsrc')
+        
+        if not self._app_source:
+            rospy.logerr('Error getting the appsrc element.')
+            return  False
+        
+        rospy.loginfo('Subscribing to AudioData on topic: {}'.format(self._ros_audio_topic))
+        rospy.Subscriber(self._ros_audio_topic, AudioData, self.on_audio_message)
+        
+        return True 
+                               
+    def valid_parameters(self):
+        if rospy.has_param(self._lm_param):
+            self.lm = rospy.get_param(self._lm_param)
+            if not os.path.isfile(self.lm):
+                rospy.logerr(
+                    'Language model file does not exist: {}'.format(self.lm))
+                return False
+        else:
+            rospy.logerr('Recognizer not started. Please specify a '
+                         'language model file.')
+            return False
+
+        if rospy.has_param(self._dic_param):
+            self.dic = rospy.get_param(self._dic_param)
+            if not os.path.isfile(self.dic):
+                rospy.logerr(
+                    'Dictionary file does not exist: {}'.format(self.dic))
+                return False
+        else:
+            rospy.logerr('Recognizer not started. Please specify a dictionary.')
+            return False
+        
+        return True
+            
+    def init_pipeline(self):
+        rospy.loginfo('Starting recognizer... pipeline: {}'.format(self.launch_config))
+        self.pipeline = Gst.parse_launch(self.launch_config)
+        if not self.pipeline:
+            rospy.logerr('Could not create gstreamer pipeline.')
+            return
+        rospy.loginfo('gstreamer pipeline created.')
+
+    def configure_ros(self):
+        rospy.on_shutdown(self.shutdown)
+        rospy.Service("~start", Empty, self.start)
+        rospy.Service("~stop", Empty, self.stop)
+        self.pub = rospy.Publisher('~output', String, queue_size=10)
+
+    def init_launch_config(self):
         if rospy.has_param(self._device_name_param):
             self.device_name = rospy.get_param(self._device_name_param)
             self.device_index = self.pulse_index_from_name(self.device_name)
@@ -78,85 +148,18 @@ class recognizer(object):
             rospy.loginfo('Using ROS audio messages as input. Topic: {}'.
                           format(self._ros_audio_topic))
         else:
-            self.launch_config = 'gconfaudiosrc'
+            self.launch_config = 'alsasrc device=plughw:0,0'# 'alsasrc device=plughw:0,0'#'pulsesrc'#'autoaudiosrrc'
 
         rospy.loginfo("Audio input: {}".format(self.launch_config))
 
         self.launch_config += " ! audioconvert ! audioresample " \
-                            + '! pocketsphinx name=asr ! fakesink'
-
-        # Configure ROS settings
-        self.started = False
-        rospy.on_shutdown(self.shutdown)
-        self.pub = rospy.Publisher('~output', String, queue_size=10)
-        rospy.Service("~start", Empty, self.start)
-        rospy.Service("~stop", Empty, self.stop)
-
-        if rospy.has_param(self._lm_param) and rospy.has_param(self._dic_param):
-            self.start_recognizer()
-        else:
-            rospy.logwarn("lm and dic parameters need to be "
-                          "set to start recognizer.")
-
+                            + '! pocketsphinx name=asr ! fakesink' 
+        
+    def element_message(self, bus, msg):
+        rospy.loginfo('Message recrecieved!!!')
+           
     def start_recognizer(self):
-        rospy.loginfo('Starting recognizer... pipeline: {}'.format(
-            self.launch_config))
-        self.pipeline = gst.parse_launch(self.launch_config)
-        if not self.pipeline:
-            rospy.logerr('Could not create gstreamer pipeline.')
-            return
-        rospy.loginfo('gstreamer pipeline created.')
-
-        self.asr = self.pipeline.get_by_name('asr')
-        self.asr.connect('partial_result', self.asr_partial_result)
-        self.asr.connect('result', self.asr_result)
-        self.asr.set_property('configured', True)
-        self.asr.set_property('dsratio', 1)
-
-        # If the ros audio topic exists, we subscribe to AudioData messages.
-        # Also make sure the appsource element was created properly.
-        if self._ros_audio_topic:
-            self._app_source = self.pipeline.get_by_name('appsrc')
-            rospy.loginfo('Subscribing to AudioData on topic: {}'.format(
-                self._ros_audio_topic))
-            rospy.Subscriber(
-                self._ros_audio_topic, AudioData, self.on_audio_message)
-            if not self._app_source:
-                rospy.logerr('Error getting the appsrc element.')
-                return
-
-        # Configure language model
-        if rospy.has_param(self._lm_param):
-            lm = rospy.get_param(self._lm_param)
-            if not os.path.isfile(lm):
-                rospy.logerr(
-                    'Language model file does not exist: {}'.format(lm))
-                return
-        else:
-            rospy.logerr('Recognizer not started. Please specify a '
-                         'language model file.')
-            return
-
-        if rospy.has_param(self._dic_param):
-            dic = rospy.get_param(self._dic_param)
-            if not os.path.isfile(dic):
-                rospy.logerr(
-                    'Dictionary file does not exist: {}'.format(dic))
-                return
-        else:
-            rospy.logerr('Recognizer not started. Please specify a dictionary.')
-            return
-
-        self.asr.set_property('lm', lm)
-        self.asr.set_property('dict', dic)
-
-        self.bus = self.pipeline.get_bus()
-        self.bus.add_signal_watch()
-        self.bus_id = self.bus.connect('message::application',
-                                       self.application_message)
-        self.pipeline.set_state(gst.STATE_PLAYING)
-        self.started = True
-
+        self.pipeline.set_state(Gst.State.PLAYING)
         rospy.loginfo('Recognizer started!')
 
     def pulse_index_from_name(self, name):
@@ -171,11 +174,7 @@ class recognizer(object):
                             format(name))
 
     def stop_recognizer(self):
-        if self.started:
-            self.pipeline.set_state(gst.STATE_NULL)
-            self.pipeline.remove(self.asr)
-            self.bus.disconnect(self.bus_id)
-            self.started = False
+        self.pipeline.set_state(Gst.State.PAUSED)
 
     def shutdown(self):
         """ Delete any remaining parameters so they don't affect next launch """
@@ -199,17 +198,17 @@ class recognizer(object):
 
     def asr_partial_result(self, asr, text, uttid):
         """ Forward partial result signals on the bus to the main thread. """
-        struct = gst.Structure('partial_result')
+        struct = Gst.Structure('partial_result')
         struct.set_value('hyp', text)
         struct.set_value('uttid', uttid)
-        asr.post_message(gst.message_new_application(asr, struct))
+        asr.post_message(Gst.message_new_application(asr, struct))
 
     def asr_result(self, asr, text, uttid):
         """ Forward result signals on the bus to the main thread. """
-        struct = gst.Structure('result')
+        struct = Gst.Structure('result')
         struct.set_value('hyp', text)
         struct.set_value('uttid', uttid)
-        asr.post_message(gst.message_new_application(asr, struct))
+        asr.post_message(Gst.message_new_application(asr, struct))
 
     def application_message(self, bus, msg):
         """ Receive application messages from the bus. """
@@ -238,10 +237,12 @@ class recognizer(object):
 
         if self._app_source:
             self._app_source.emit('push-buffer',
-                                  gst.Buffer(str(bytearray(audio.data))))
+                                  Gst.Buffer(str(bytearray(audio.data))))
 
 
 if __name__ == "__main__":
     start = recognizer()
-    rospy.spin()
     #gtk.main()
+    GObject.MainLoop().run() 
+    #rospy.spin()
+    
