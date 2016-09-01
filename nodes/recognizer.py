@@ -5,6 +5,7 @@ recognizer.py is a wrapper for pocketsphinx.
   parameters:
     ~lm - filename of language model
     ~dict - filename of dictionary
+    ~kws - filename of keyword list
     ~alsa_mic_name - set the alsasrc device name
         e.g. hw:1,0
     ~pulse_mic_name - set the pulsesrc device name for the microphone input.
@@ -41,9 +42,11 @@ import commands
 class recognizer(object):
     """ GStreamer based speech recognizer. """
 
+    _kws_param = "~kws"
     _alsa_device_name_param = "~alsa_mic_name"
     _pulse_device_name_param = "~pulse_mic_name"
     _lm_param = "~lm"
+    _hmm_param = "~hmm"
     _dic_param = "~dict"
     _audio_topic_param = "~audio_msg_topic"
     _verbose_param = "~verbose"
@@ -57,9 +60,11 @@ class recognizer(object):
     
     verbose = True
     started = False
-    
+    kws = None
+    hmm = None
+    lm = None
+
     def __init__(self):
-        rospy.loginfo('#########')
         rospy.init_node("recognizer")
 
         if not self.valid_parameters():
@@ -76,8 +81,13 @@ class recognizer(object):
             if not self.suscribe_to_audio_topic():
                 return;
 
-        self.asr.set_property('lm', self.lm)
         self.asr.set_property('dict', self.dic)
+        if (self.lm):
+            self.asr.set_property('lm', self.lm)
+        if (self.kws):
+            self.asr.set_property('kws', self.kws)
+        if (self.hmm):
+            self.asr.set_property('hmm', self.hmm)
         
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
@@ -103,15 +113,23 @@ class recognizer(object):
         return True 
                                
     def valid_parameters(self):
+        if rospy.has_param(self._kws_param):
+            self.kws = rospy.get_param(self._kws_param)
+
+        if rospy.has_param(self._hmm_param):
+            self.hmm = rospy.get_param(self._hmm_param)
+
         if rospy.has_param(self._lm_param):
             self.lm = rospy.get_param(self._lm_param)
             if not os.path.isfile(self.lm):
                 rospy.logerr(
                     'Language model file does not exist: {}'.format(self.lm))
                 return False
+        elif rospy.has_param(self._kws_param):
+            self.kws = rospy.get_param(self._kws_param)
         else:
             rospy.logerr('Recognizer not started. Please specify a '
-                         'language model file.')
+                         'language model or keyword list file.')
             return False
 
         if rospy.has_param(self._dic_param):
@@ -214,8 +232,8 @@ class recognizer(object):
         return EmptyResponse()
 
     def partial_result(self, hyp):
-        if (self.verbose):
-            rospy.loginfo("Partial: " + hyp)
+        #if (self.verbose):
+        rospy.loginfo("Partial: " + hyp)
 
     def final_result(self, hyp):
         msg = String()
