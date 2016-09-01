@@ -216,7 +216,7 @@ class recognizer(object):
 
     def shutdown(self):
         """ Delete any remaining parameters so they don't affect next launch """
-        for param in [self._alsa_device_name_param, self._pulse_device_name_param, self._lm_param, self._dic_param,
+        for param in [self._kws_param, self._hmm_param, self._verbose_param, self._alsa_device_name_param, self._pulse_device_name_param, self._lm_param, self._dic_param,
                       self._audio_topic_param]:
             if rospy.has_param(param):
                 rospy.delete_param(param)
@@ -232,8 +232,8 @@ class recognizer(object):
         return EmptyResponse()
 
     def partial_result(self, hyp):
-        #if (self.verbose):
-        rospy.loginfo("Partial: " + hyp)
+        if (self.verbose):
+            rospy.loginfo("Partial: " + hyp)
 
     def final_result(self, hyp):
         msg = String()
