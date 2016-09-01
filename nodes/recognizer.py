@@ -12,6 +12,7 @@ recognizer.py is a wrapper for pocketsphinx.
            alsa_input.usb-Logitech_Logitech_G35_Headset-00-Headset_1.analog-mono
            To list audio device info on your machine, in a terminal type:
            pacmd list-sources
+    ~verbose - this parameter activates or deactivates partial results log
   publications:
     ~output (std_msgs/String) - text output
   services:
@@ -45,6 +46,7 @@ class recognizer(object):
     _lm_param = "~lm"
     _dic_param = "~dict"
     _audio_topic_param = "~audio_msg_topic"
+    _verbose_param = "~verbose"
     
     _ros_audio_topic = None
     _app_source = None
@@ -53,6 +55,7 @@ class recognizer(object):
     bus = None
     bus_id = None
     
+    verbose = True
     started = False
     
     def __init__(self):
@@ -65,6 +68,7 @@ class recognizer(object):
         self.init_launch_config()
         self.configure_ros()
         self.init_pipeline()
+        self.set_verbosity()
         
         self.asr = self.pipeline.get_by_name('asr')
         
@@ -81,7 +85,10 @@ class recognizer(object):
 
         self.pipeline.set_state(Gst.State.PAUSED)
         #self.start_recognizer()
-                          
+
+    def set_verbosity(self):
+        self.verbose = rospy.has_param(self._verbose_param)
+
     def suscribe_to_audio_topic(self):
         # returns True if it is able to subscribe succesfully
         self._app_source = self.pipeline.get_by_name('appsrc')
@@ -162,7 +169,6 @@ class recognizer(object):
                             + '! pocketsphinx name=asr ! fakesink' 
         
     def element_message(self, bus, msg):
-        rospy.loginfo('Message recrecieved')
         msgtype = msg.get_structure().get_name()
         if msgtype != 'pocketsphinx':
             return
@@ -208,7 +214,8 @@ class recognizer(object):
         return EmptyResponse()
 
     def partial_result(self, hyp):
-        rospy.loginfo("Partial: " + hyp)
+        if (self.verbose):
+            rospy.loginfo("Partial: " + hyp)
 
     def final_result(self, hyp):
         msg = String()
